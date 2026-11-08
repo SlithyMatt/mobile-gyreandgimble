@@ -1,0 +1,118 @@
+# Builds Gyre & Gimble on GitHub's runners: the core tests on Linux, a
+# debug APK for Android, and the iOS app (unsigned) for the simulator and
+# for devices. The builds are uploaded as workflow artifacts; publishing a
+# release (or running this by hand with a tag) also attaches them to it.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Attach the builds to this existing release tag (blank: don't)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Tests (joytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build and run joytest
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target joytest -j4
+          ctest --test-dir build --output-on-failure
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install SDK packages
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Build the debug APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Collect
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/gyre-and-gimble-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: out/*.apk
+
+  ios:
+    name: iOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure
+        run: cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS
+      - name: Build for the simulator
+        run: |
+          xcodebuild -project build-ios/GyreAndGimble.xcodeproj -scheme GyreAndGimble \
+            -configuration Release -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath dd-sim CODE_SIGNING_ALLOWED=NO build
+      - name: Build for devices (unsigned)
+        run: |
+          xcodebuild -project build-ios/GyreAndGimble.xcodeproj -scheme GyreAndGimble \
+            -configuration Release -sdk iphoneos -destination "generic/platform=iOS" \
+            -derivedDataPath dd-dev CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Collect
+        run: |
+          mkdir -p out Payload
+          sim=$(find dd-sim -name "GyreAndGimble.app" -path "*iphonesimulator*" | head -1)
+          dev=$(find dd-dev -name "GyreAndGimble.app" -path "*iphoneos*" | head -1)
+          (cd "$(dirname "$sim")" && zip -qry "$GITHUB_WORKSPACE/out/gyre-and-gimble-ios-simulator.zip" GyreAndGimble.app)
+          cp -R "$dev" Payload/
+          zip -qry out/gyre-and-gimble-ios-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: out/*
+
+  publish:
+    name: Attach to the release
+    needs: [test, android, ios]
+    if: github.event_name == 'release' || inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          cd out
+          for f in *; do mv "$f" "${f%%.*}-$TAG.${f#*.}"; done
+          ls -la
+          gh release upload "$TAG" * --clobber --repo "$GITHUB_REPOSITORY"
