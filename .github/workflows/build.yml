@@ -53,6 +53,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
+          # SDL's unused sample project has a wrapper JAR the check doesn't know
+          validate-wrappers: false
       - name: Build the debug APK
         working-directory: android
         run: gradle assembleDebug --no-daemon --stacktrace
