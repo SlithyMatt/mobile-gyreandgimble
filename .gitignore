@@ -1,0 +1,13 @@
+build/
+build-*/
+.DS_Store
+# Android
+android/.gradle/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+android/.idea/
+*.iml
+# Xcode
+*.xcuserstate
+xcuserdata/

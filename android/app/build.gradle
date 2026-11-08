@@ -1,0 +1,57 @@
+// Gyre & Gimble for Android. The native code (the game, SDL2 and ymfm) is
+// built by the root CMakeLists.txt, which also generates the game data from
+// the x16 submodule, so the build machine needs Python 3 on its PATH.
+plugins {
+    id 'com.android.application'
+}
+
+def repoRoot = file('../..')
+
+android {
+    namespace 'com.slithymatt.gyreandgimble'
+    compileSdk 36
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'com.slithymatt.gyreandgimble'
+        minSdk 21
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static'
+                abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "${repoRoot}/CMakeLists.txt"
+            version '3.22.1+'
+        }
+    }
+
+    sourceSets {
+        main {
+            // SDL's Java side (SDLActivity and friends), straight from the submodule
+            java.srcDirs += "${repoRoot}/third_party/SDL/android-project/app/src/main/java"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        abortOnError false
+    }
+}
